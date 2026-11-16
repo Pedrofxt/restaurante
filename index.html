@@ -353,6 +353,14 @@ body.drawer-open .drawer{transform:none}
 .pw-eye:active svg{transform:scale(.85)}
 input::-ms-reveal,input::-ms-clear{display:none}
 
+.mesa-add{border:1.5px dashed var(--line-2);border-radius:var(--r);min-height:168px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--mute);transition:.35s var(--ease)}
+.mesa-add:hover{color:var(--amber);border-color:rgba(233,168,76,.55);background:rgba(233,168,76,.04);transform:translateY(-4px)}
+.mesa-add span{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:var(--surface-2);transition:.35s var(--ease)}
+.mesa-add:hover span{background:var(--amber);color:#1b1307;transform:rotate(90deg)}
+.view.enter .mesa-add{animation:rise .8s var(--ease) both;animation-delay:calc(var(--i,0) * 45ms + 80ms)}
+.d-head-acts{display:flex;gap:8px;align-items:center}
+.icon-btn.danger{color:var(--ember);border-color:rgba(226,103,79,.45);background:rgba(226,103,79,.08);width:auto;padding:0 12px;gap:6px;font-size:13px;display:flex}
+
 /* ---------- primeiro acesso ---------- */
 .onb{min-height:100vh;display:grid;place-items:center;padding:40px 20px;position:relative;overflow:hidden}
 .onb .aurora{opacity:.35}
@@ -521,6 +529,8 @@ function supaApi(sb) {
     },
     async fecharMesa(id) { ok(await sb.rpc('fechar_mesa', { p_mesa: id })); },
     async setMesaInfo(id, patch) { ok(await sb.from('mesas').update(patch).eq('id', id)); },
+    async criarMesa(m) { ok(await sb.from('mesas').insert({ numero: m.numero, lugares: m.lugares })); },
+    async excluirMesa(id) { ok(await sb.from('mesas').delete().eq('id', id)); },
     async listPerfis() { return ok(await sb.from('profiles').select('*').order('nome')); },
     async definirPapel(uid, papel) { ok(await sb.rpc('definir_papel', { p_usuario: uid, p_papel: papel })); },
     async escolherPapel(papel) { ok(await sb.rpc('escolher_papel', { p_papel: papel })); },
@@ -657,6 +667,12 @@ function demoApi() {
     async listPerfis() { return structuredClone(db.perfis); },
     async definirPapel(uid, papel) { const p = db.perfis.find(p => p.id === uid); if (p) p.papel = papel; commit(); },
     async setMesaInfo(id, patch) { Object.assign(db.mesas.find(m => m.id === id), patch); commit(); },
+    async criarMesa(m) {
+      if (db.mesas.some(x => x.numero === m.numero)) throw new Error('duplicate key value violates unique constraint "mesas_numero_key"');
+      db.mesas.push({ id: Math.max(0, ...db.mesas.map(x => x.id)) + 1, numero: m.numero, lugares: m.lugares, pessoas: 0, status: 'livre', garcom_id: null, aberta_em: null });
+      db.mesas.sort((a, b) => a.numero - b.numero); commit();
+    },
+    async excluirMesa(id) { db.mesas = db.mesas.filter(m => m.id !== id); db.pedidos = db.pedidos.filter(p => p.mesa_id !== id); commit(); },
     async updateNome(uid, nome) { const p = perfilDe(uid); if (p) p.nome = nome; commit(); },
     async uploadAvatar(uid, blob) { const p = perfilDe(uid); if (p) p.avatar_url = await blobToDataURL(blob); commit(); },
     async removeAvatar(uid) { const p = perfilDe(uid); if (p) p.avatar_url = null; commit(); },
@@ -694,7 +710,7 @@ const S = {
   view: 'salao', filtro: 'todas', soMeus: false,
   mesaId: null, aba: 'novo', cat: 'Todos', drafts: {}, confirmFechar: false,
   authMode: 'login', demoRole: 'garcom', signupRole: 'garcom',
-  prodEdit: null, prodFoto: null, prodCat: 'Todos', prodBusca: '', confirmExcluir: false, pendMesa: {},
+  prodEdit: null, prodFoto: null, prodCat: 'Todos', prodBusca: '', confirmExcluir: false, pendMesa: {}, novaMesa: false, confirmMesa: false,
   som: (() => { try { return localStorage.getItem('ambar-som') !== '0'; } catch { return true; } })(),
   seen: new Set(), firstLoad: true, animate: true, dAnim: false,
 };
@@ -844,6 +860,7 @@ function viewSalao() {
   const ativos = S.pedidos.filter(p => ATIVOS.includes(p.status));
   const filtros = [['todas', 'Todas', S.mesas.length], ...Object.entries(MESA_ST).map(([k, v]) => [k, v, c[k]])];
   const list = S.mesas.filter(m => S.filtro === 'todas' || m.status === S.filtro);
+  const gerente = can('admin');
   return `<section class="view">
     <div class="view-head"><div><p class="eyebrow">Salão</p><h1>Mesas</h1></div>
       <div class="chips">${filtros.map(([k, l, n]) => `<button class="chip ${S.filtro === k ? 'on' : ''}" data-act="filtro" data-v="${k}">${l}<small>${n}</small></button>`).join('')}</div></div>
@@ -851,7 +868,7 @@ function viewSalao() {
       ${stat('Livres', c.livre, 'sage', 0)}${stat('Em atendimento', c.ocupada + c.conta, 'amber', 1)}
       ${stat('Pedidos na cozinha', ativos.filter(p => p.status !== 'pronto').length, 'sky', 2)}${stat('Prontos para servir', ativos.filter(p => p.status === 'pronto').length, 'ember', 3)}
     </div>
-    <div class="grid-mesas">${list.map(mesaCard).join('') || '<p class="mute">Nenhuma mesa neste filtro.</p>'}</div>
+    <div class="grid-mesas">${list.map(mesaCard).join('')}${gerente && S.filtro === 'todas' ? `<button class="mesa-add" data-act="nova-mesa" style="--i:${list.length + 4}"><span>${I('plus', 22)}</span>Nova mesa</button>` : ''}${!list.length && !(gerente && S.filtro === 'todas') ? '<p class="mute">Nenhuma mesa neste filtro.</p>' : ''}</div>
   </section>`;
 }
 
@@ -1075,6 +1092,25 @@ function viewPerfil() {
   </section>`;
 }
 
+function novaMesaHtml() {
+  const prox = Math.max(0, ...S.mesas.map(m => m.numero)) + 1;
+  return `
+    <div class="d-head">
+      <div><p class="eyebrow">Salão</p><h2>Nova mesa</h2></div>
+      <button class="icon-btn" data-act="close-drawer" aria-label="Fechar">${I('x')}</button>
+    </div>
+    <div class="d-body">
+      <form id="formMesa" autocomplete="off">
+        <div class="two">
+          <label class="field"><span>Número da mesa</span><input name="numero" type="number" inputmode="numeric" min="1" max="999" step="1" required value="${prox}"></label>
+          <label class="field"><span>Lugares</span><input name="lugares" type="number" inputmode="numeric" min="1" max="30" step="1" required value="4"></label>
+        </div>
+        <p class="hint" style="margin-top:4px">Já existem ${S.mesas.length} mesas: ${S.mesas.map(m => pad(m.numero)).join(', ') || 'nenhuma'}.</p>
+      </form>
+    </div>
+    <div class="cart"><button class="btn btn-primary btn-block" type="submit" form="formMesa">${I('plus', 16)}<span>Adicionar mesa</span></button></div>`;
+}
+
 function stepper(m, k, label) {
   const val = Number(m[k]) || 0, over = k === 'pessoas' && val > m.lugares;
   return `<div class="stepper ${over ? 'over' : ''}"><div><span>${label}</span>${over ? '<small>acima da capacidade</small>' : ''}</div>
@@ -1097,12 +1133,12 @@ const salvarMesaInfo = (() => {
 /* ---------- Gaveta da mesa ---------- */
 function renderDrawer() {
   const d = $('#drawer'); if (!d) return;
-  if (!S.mesaId && !S.prodEdit) { document.body.classList.remove('drawer-open'); return; }
+  if (!S.mesaId && !S.prodEdit && !S.novaMesa) { document.body.classList.remove('drawer-open'); return; }
   if (S.prodEdit) syncProdForm();
   const body = d.querySelector('.d-body');
   const st = body && !S.dAnim ? body.scrollTop : 0;
   const lt = d.querySelector('.cart-lines')?.scrollTop || 0;
-  d.innerHTML = S.prodEdit ? produtoFormHtml() : drawerHtml();
+  d.innerHTML = S.prodEdit ? produtoFormHtml() : S.novaMesa ? novaMesaHtml() : drawerHtml();
   const nb = d.querySelector('.d-body');
   if (nb) { nb.scrollTop = st; if (S.dAnim) nb.classList.add('enter'); }
   const nl = d.querySelector('.cart-lines'); if (nl) nl.scrollTop = lt;
@@ -1116,7 +1152,10 @@ function drawerHtml() {
   return `
     <div class="d-head">
       <div><p class="eyebrow">${m.lugares} lugares${m.aberta_em ? ` · aberta há <span data-since="${m.aberta_em}">${ago(m.aberta_em)}</span>` : ''}</p><h2>Mesa ${pad(m.numero)}</h2></div>
-      <button class="icon-btn" data-act="close-drawer" aria-label="Fechar">${I('x')}</button>
+      <div class="d-head-acts">
+        ${can('admin') ? `<button class="icon-btn ${S.confirmMesa ? 'danger' : ''}" data-act="excluir-mesa" aria-label="Excluir mesa" title="Excluir mesa">${I('trash', 16)}${S.confirmMesa ? '<span>Excluir?</span>' : ''}</button>` : ''}
+        <button class="icon-btn" data-act="close-drawer" aria-label="Fechar">${I('x')}</button>
+      </div>
     </div>
     <div class="seg seg-status">${Object.entries(MESA_ST).map(([k, v]) => `<button class="${m.status === k ? 'on' : ''}" style="--c:var(--${COR_MESA[k]})" data-act="mesa-status" data-v="${k}">${v}</button>`).join('')}</div>
     <div class="mesa-info">${stepper(m, 'lugares', 'Lugares')}${stepper(m, 'pessoas', 'Pessoas na mesa')}</div>
@@ -1195,7 +1234,7 @@ async function refresh() {
     renderNav();
     if (S.view !== 'perfil') renderView();
     const ae = document.activeElement;
-    if (!S.prodEdit && !(ae && ae.closest('#drawer') && ae.matches('input,textarea'))) renderDrawer();
+    if (!S.prodEdit && !S.novaMesa && !(ae && ae.closest('#drawer') && ae.matches('input,textarea'))) renderDrawer();
     S.firstLoad = false;
   } catch (err) { toast(traduz(err), 'err'); }
   finally { refreshing = false; if (again) { again = false; refresh(); } }
@@ -1281,6 +1320,24 @@ const ACTS = {
     toast(`"${p.nome}" foi excluído do cardápio`, 'ok');
     ACTS['close-drawer'](); await refresh();
   },
+  'nova-mesa': () => {
+    S.mesaId = null; S.prodEdit = null; S.novaMesa = true; S.dAnim = true; renderDrawer();
+    setTimeout(() => { const i = $('#formMesa [name=numero]'); i?.focus({ preventScroll: true }); i?.select(); }, 450);
+  },
+  'excluir-mesa': async () => {
+    const id = S.mesaId, m = S.mesas.find(x => x.id === id); if (!m) return;
+    if (pedidosDaMesa(id).length) return toast('Feche a conta desta mesa antes de excluí-la.', 'warn');
+    if (!S.confirmMesa) {
+      S.confirmMesa = true; renderDrawer();
+      setTimeout(() => { if (S.confirmMesa && S.mesaId === id) { S.confirmMesa = false; renderDrawer(); } }, 4000);
+      return;
+    }
+    S.confirmMesa = false;
+    await api.excluirMesa(id);
+    delete S.drafts[id];
+    toast(`Mesa ${pad(m.numero)} excluída`, 'ok');
+    ACTS['close-drawer'](); S.animate = true; await refresh();
+  },
   'mesa-num': (v, t) => {
     const m = S.mesas.find(x => x.id === S.mesaId); if (!m) return;
     const k = t.dataset.k, [lo, hi] = k === 'lugares' ? [1, 30] : [0, 99];
@@ -1296,11 +1353,11 @@ const ACTS = {
   nav: async v => {
     if (S.view === v) return;
     if (v === 'equipe') S.perfis = await api.listPerfis();
-    S.view = v; S.animate = true; S.mesaId = null; S.prodEdit = null;
+    S.view = v; S.animate = true; S.mesaId = null; S.prodEdit = null; S.novaMesa = false;
     transition(() => { renderNav(); renderView(); renderDrawer(); });
   },
-  'open-mesa': v => { S.prodEdit = null; S.mesaId = +v; S.aba = 'novo'; S.cat = 'Todos'; S.confirmFechar = false; S.dAnim = true; renderDrawer(); },
-  'close-drawer': () => { if (S.prodFoto?.url) URL.revokeObjectURL(S.prodFoto.url); S.mesaId = null; S.prodEdit = null; S.prodFoto = null; S.confirmExcluir = false; renderDrawer(); },
+  'open-mesa': v => { S.prodEdit = null; S.novaMesa = false; S.confirmMesa = false; S.mesaId = +v; S.aba = 'novo'; S.cat = 'Todos'; S.confirmFechar = false; S.dAnim = true; renderDrawer(); },
+  'close-drawer': () => { if (S.prodFoto?.url) URL.revokeObjectURL(S.prodFoto.url); S.mesaId = null; S.prodEdit = null; S.novaMesa = false; S.confirmMesa = false; S.prodFoto = null; S.confirmExcluir = false; renderDrawer(); },
   tab: v => { if (S.aba === v) return; S.aba = v; S.dAnim = true; S.confirmFechar = false; renderDrawer(); },
   cat: v => { S.cat = v; S.dAnim = true; renderDrawer(); },
   filtro: v => { S.filtro = v; S.animate = true; renderView(); },
@@ -1379,6 +1436,15 @@ const FORMS = {
     if (fd.get('senha') !== fd.get('conf')) throw new Error('As senhas não conferem.');
     await api.updateSenha(fd.get('senha')); f.reset();
     toast(DEMO ? 'No modo demonstração a senha não é alterada.' : 'Senha atualizada', 'ok');
+  },
+  formMesa: async (f, fd) => {
+    const numero = Math.round(Number(fd.get('numero'))), lugares = Math.round(Number(fd.get('lugares')));
+    if (!(numero >= 1)) throw new Error('Informe um número de mesa válido.');
+    if (!(lugares >= 1 && lugares <= 30)) throw new Error('A mesa precisa ter de 1 a 30 lugares.');
+    if (S.mesas.some(m => m.numero === numero)) throw new Error(`Já existe a mesa ${pad(numero)}.`);
+    await api.criarMesa({ numero, lugares });
+    toast(`Mesa ${pad(numero)} adicionada`, 'ok');
+    ACTS['close-drawer'](); S.filtro = 'todas'; S.animate = true; await refresh();
   },
   formProduto: async (f, fd) => {
     const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
@@ -1497,6 +1563,7 @@ function traduz(e) {
     'row-level security': 'Você não tem permissão para esta ação.',
     'rate limit': 'Muitas tentativas seguidas. Aguarde alguns minutos.',
     'same email': 'Este já é o seu e-mail atual.',
+    'mesas_numero_key': 'Já existe uma mesa com esse número.',
   };
   for (const k in map) if (m.includes(k)) return map[k];
   if (/provider is not enabled|Unsupported provider/i.test(m)) return 'O login com Google ainda não foi ativado no Supabase.';

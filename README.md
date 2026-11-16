@@ -14,7 +14,7 @@ Aplicação web para controle de mesas de restaurante, com login (e-mail e Googl
 
 Todos têm a tela **Perfil**: trocar foto, nome, e-mail e senha, ligar ou desligar os sons e sair (inclusive de todos os aparelhos). **Cozinha** e **Gerência** também acessam o **Cardápio**, onde cadastram produtos com foto, preço, categoria e tempo mínimo e máximo de espera, e marcam itens como indisponíveis.
 
-Na mesa, o garçom ajusta quantos **lugares** ela tem e quantas **pessoas** estão sentadas. Cada pedido mostra a **previsão de preparo**, calculada a partir dos tempos dos produtos. O cronômetro da cozinha fica amarelo ao passar do tempo mínimo e vermelho ao passar do máximo.
+Na mesa, o garçom ajusta quantos **lugares** ela tem e quantas **pessoas** estão sentadas. A **Gerência** adiciona mesas novas (card *Nova mesa* no Salão) e exclui mesas pela lixeira dentro de cada uma; só é possível excluir depois que a conta da mesa foi fechada. Cada pedido mostra a **previsão de preparo**, calculada a partir dos tempos dos produtos. O cronômetro da cozinha fica amarelo ao passar do tempo mínimo e vermelho ao passar do máximo.
 
 **Cadastro:** a primeira conta criada vira **Gerência**. No cadastro por e-mail, cada pessoa escolhe **Garçom** ou **Cozinha**; quem entra pelo Google escolhe no primeiro acesso. A gerência pode mudar a função depois, na tela Equipe. Para garantir que um e-mail sempre entre como Gerência, rode no SQL Editor: `insert into public.emails_gerencia (email) values ('email@exemplo.com');`
 
