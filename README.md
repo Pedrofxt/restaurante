@@ -1,6 +1,6 @@
 # Âmbar · Controle de Mesas
 
-Aplicação web para controle de mesas de restaurante, com login (e-mail, Google e GitHub), anotação de pedidos pelo garçom e painel da cozinha em tempo real. Usa **Supabase** como banco de dados e autenticação.
+Aplicação web para controle de mesas de restaurante, com login (e-mail e Google), anotação de pedidos pelo garçom e painel da cozinha em tempo real. Usa **Supabase** como banco de dados e autenticação.
 
 > Âmbar é um restaurante fictício. Nome e logo foram criados para este projeto.
 
@@ -24,7 +24,7 @@ A primeira conta criada vira **Gerência** automaticamente; as seguintes entram 
 1. **Banco:** no Supabase, abra **SQL Editor**, cole o conteúdo de `schema.sql` e clique em **Run**.
 2. **Chaves:** em `index.html`, preencha `CONFIG.SUPABASE_URL` e `CONFIG.SUPABASE_KEY` (botão **Connect** no topo do projeto, ou *Project Settings → API Keys*). Use só a chave **publishable/anon**, nunca a `service_role`/secret.
 3. **URLs de retorno:** em *Authentication → URL Configuration*, defina **Site URL** como `https://pedrofxt.github.io/restaurante/` e adicione a mesma URL em **Redirect URLs**.
-4. **Login social (opcional):** em *Authentication → Sign In / Providers*, ative **Google** e/ou **GitHub** com o Client ID e o Secret de cada um. A URL de callback a cadastrar no Google Cloud / GitHub OAuth App é `https://SEU-PROJETO.supabase.co/auth/v1/callback`.
+4. **Login com Google (opcional):** em *Authentication → Sign In / Providers*, ative **Google** com o Client ID e o Secret criados no Google Cloud. A URL de redirecionamento a cadastrar no Google é `https://SEU-PROJETO.supabase.co/auth/v1/callback`.
 
 Sem as chaves preenchidas, o site roda em **modo demonstração**: os dados ficam só no navegador, e duas abas (uma como Garçom, outra como Cozinha) se sincronizam entre si.
 

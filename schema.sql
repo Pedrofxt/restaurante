@@ -66,7 +66,7 @@ returns text language sql stable security definer set search_path = public as $$
   select papel from public.profiles where id = auth.uid()
 $$;
 
--- Cria o perfil automaticamente no cadastro (e-mail, Google ou GitHub).
+-- Cria o perfil automaticamente no cadastro (e-mail ou Google).
 -- A primeira conta do sistema vira Gerência (admin); as demais entram como Garçom.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
