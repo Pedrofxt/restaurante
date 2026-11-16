@@ -53,6 +53,18 @@ create table if not exists public.itens_pedido (
   observacao  text
 );
 
+-- Colunas adicionadas depois da primeira versão (seguro rodar de novo)
+alter table public.profiles add column if not exists precisa_papel boolean not null default false;
+alter table public.cardapio add column if not exists foto_url text;
+alter table public.cardapio add column if not exists tempo_min int not null default 10;
+alter table public.cardapio add column if not exists tempo_max int not null default 20;
+alter table public.mesas    add column if not exists pessoas   int not null default 0;
+do $$
+begin
+  begin alter table public.cardapio add constraint cardapio_tempo_ok check (tempo_min >= 0 and tempo_max >= tempo_min); exception when duplicate_object then null; end;
+  begin alter table public.mesas    add constraint mesas_pessoas_ok check (pessoas >= 0 and pessoas <= 99);            exception when duplicate_object then null; end;
+end $$;
+
 create index if not exists pedidos_mesa_aberta_idx on public.pedidos (mesa_id) where not pago;
 create index if not exists pedidos_criado_idx      on public.pedidos (criado_em desc);
 create index if not exists pedidos_garcom_idx      on public.pedidos (garcom_id);
@@ -67,22 +79,42 @@ returns text language sql stable security definer set search_path = public as $$
 $$;
 
 -- Cria o perfil automaticamente no cadastro (e-mail ou Google).
--- A primeira conta do sistema vira Gerência (admin); as demais entram como Garçom.
+--   • A primeira conta do sistema vira Gerência (admin).
+--   • No cadastro por e-mail a pessoa escolhe Garçom ou Cozinha.
+--   • No Google a escolha é feita no primeiro acesso (precisa_papel = true).
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  v_primeiro boolean := not exists (select 1 from public.profiles);
+  v_escolha  text    := new.raw_user_meta_data->>'papel';
 begin
-  insert into public.profiles (id, nome, avatar_url, papel)
+  insert into public.profiles (id, nome, avatar_url, papel, precisa_papel)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name',
              new.raw_user_meta_data->>'name',
              new.raw_user_meta_data->>'user_name',
              split_part(new.email, '@', 1)),
-    new.raw_user_meta_data->>'avatar_url',
-    case when exists (select 1 from public.profiles) then 'garcom' else 'admin' end
+    coalesce(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture'),
+    case when v_primeiro then 'admin'
+         when v_escolha in ('garcom','cozinha') then v_escolha
+         else 'garcom' end,
+    not v_primeiro and coalesce(v_escolha, '') not in ('garcom','cozinha')
   )
   on conflict (id) do nothing;
   return new;
+end $$;
+
+-- Primeiro acesso pelo Google: a pessoa escolhe Garçom ou Cozinha (uma única vez).
+create or replace function public.escolher_papel(p_papel text)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if p_papel not in ('garcom','cozinha') then
+    raise exception 'Escolha Garçom ou Cozinha';
+  end if;
+  update public.profiles
+     set papel = p_papel, precisa_papel = false
+   where id = auth.uid() and precisa_papel;
 end $$;
 
 drop trigger if exists on_auth_user_created on auth.users;
@@ -138,10 +170,10 @@ begin
   join public.cardapio c on c.id = (i->>'item_id')::int;
 
   update public.mesas
-     set status = 'ocupada',
+     set status    = case when status in ('livre','reservada') then 'ocupada' else status end,
          garcom_id = coalesce(garcom_id, auth.uid()),
          aberta_em = coalesce(aberta_em, now())
-   where id = p_mesa and status in ('livre','reservada');
+   where id = p_mesa;
 
   return v_id;
 end $$;
@@ -154,7 +186,7 @@ begin
     raise exception 'Somente o salão pode fechar contas';
   end if;
   update public.pedidos set pago = true where mesa_id = p_mesa and not pago;
-  update public.mesas set status = 'livre', garcom_id = null, aberta_em = null where id = p_mesa;
+  update public.mesas set status = 'livre', garcom_id = null, aberta_em = null, pessoas = 0 where id = p_mesa;
 end $$;
 
 -- Gerência define a função de cada membro da equipe.
@@ -173,6 +205,7 @@ end $$;
 revoke execute on function public.criar_pedido(int, text, jsonb) from anon;
 revoke execute on function public.fechar_mesa(int)              from anon;
 revoke execute on function public.definir_papel(uuid, text)     from anon;
+revoke execute on function public.escolher_papel(text)          from anon;
 
 -- ---------- Segurança (RLS) --------------------------------------------
 alter table public.profiles     enable row level security;
@@ -212,12 +245,13 @@ drop policy if exists "gerência cria cardápio"      on public.cardapio;
 drop policy if exists "gerência edita cardápio"     on public.cardapio;
 drop policy if exists "gerência remove cardápio"    on public.cardapio;
 create policy "equipe lê cardápio"       on public.cardapio for select to authenticated using (true);
+-- Gerência e cozinha cadastram, editam e removem produtos
 create policy "gerência cria cardápio"   on public.cardapio for insert to authenticated
-  with check ((select public.meu_papel()) = 'admin');
+  with check ((select public.meu_papel()) in ('admin','cozinha'));
 create policy "gerência edita cardápio"  on public.cardapio for update to authenticated
-  using ((select public.meu_papel()) = 'admin') with check ((select public.meu_papel()) = 'admin');
+  using ((select public.meu_papel()) in ('admin','cozinha')) with check ((select public.meu_papel()) in ('admin','cozinha'));
 create policy "gerência remove cardápio" on public.cardapio for delete to authenticated
-  using ((select public.meu_papel()) = 'admin');
+  using ((select public.meu_papel()) in ('admin','cozinha'));
 
 -- Pedidos
 drop policy if exists "equipe lê pedidos"       on public.pedidos;
@@ -248,30 +282,67 @@ begin
   begin alter publication supabase_realtime add table public.pedidos;      exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.itens_pedido; exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.mesas;        exception when duplicate_object then null; end;
+  begin alter publication supabase_realtime add table public.cardapio;     exception when duplicate_object then null; end;
 end $$;
+
+-- ---------- Fotos (Storage) ------------------------------------------
+-- avatars/<id do usuário>/arquivo  → foto de perfil (cada um só mexe na sua pasta)
+-- produtos/arquivo                 → fotos do cardápio (gerência e cozinha)
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types) values
+  ('avatars',  'avatars',  true, 2097152, array['image/jpeg','image/png','image/webp']),
+  ('produtos', 'produtos', true, 5242880, array['image/jpeg','image/png','image/webp'])
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "fotos: equipe vê"          on storage.objects;
+drop policy if exists "avatar: dono envia"        on storage.objects;
+drop policy if exists "avatar: dono atualiza"     on storage.objects;
+drop policy if exists "avatar: dono apaga"        on storage.objects;
+drop policy if exists "produtos: equipe envia"    on storage.objects;
+drop policy if exists "produtos: equipe atualiza" on storage.objects;
+drop policy if exists "produtos: equipe apaga"    on storage.objects;
+
+create policy "fotos: equipe vê" on storage.objects for select to authenticated
+  using (bucket_id in ('avatars','produtos'));
+create policy "avatar: dono envia" on storage.objects for insert to authenticated
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "avatar: dono atualiza" on storage.objects for update to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text)
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "avatar: dono apaga" on storage.objects for delete to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "produtos: equipe envia" on storage.objects for insert to authenticated
+  with check (bucket_id = 'produtos' and (select public.meu_papel()) in ('admin','cozinha'));
+create policy "produtos: equipe atualiza" on storage.objects for update to authenticated
+  using (bucket_id = 'produtos' and (select public.meu_papel()) in ('admin','cozinha'))
+  with check (bucket_id = 'produtos' and (select public.meu_papel()) in ('admin','cozinha'));
+create policy "produtos: equipe apaga" on storage.objects for delete to authenticated
+  using (bucket_id = 'produtos' and (select public.meu_papel()) in ('admin','cozinha'));
 
 -- ---------- Dados iniciais ---------------------------------------------
 insert into public.mesas (numero, lugares) values
   (1,2),(2,2),(3,4),(4,4),(5,4),(6,6),(7,2),(8,4),(9,4),(10,6),(11,8),(12,2)
 on conflict (numero) do nothing;
 
-insert into public.cardapio (nome, descricao, categoria, preco)
+insert into public.cardapio (nome, descricao, categoria, preco, tempo_min, tempo_max)
 select * from (values
-  ('Pão de fermentação natural', 'Manteiga de ervas e flor de sal',            'Entradas',   22.00),
-  ('Bolinho de bacalhau',        '6 unidades, aioli de limão',                 'Entradas',   38.00),
-  ('Carpaccio de beterraba',     'Beterraba assada na brasa, queijo de cabra', 'Entradas',   34.00),
-  ('Peixe do dia na brasa',      'Purê de mandioquinha e farofa de castanhas', 'Principais', 89.00),
-  ('Ancho na brasa',             '350 g, chimichurri e batatas rústicas',      'Principais',112.00),
-  ('Risoto de cogumelos',        'Shiitake, shimeji e parmesão',               'Principais', 76.00),
-  ('Polvo grelhado',             'Batatas ao murro e páprica defumada',        'Principais',118.00),
-  ('Nhoque de abóbora',          'Manteiga de sálvia e amêndoas',              'Principais', 64.00),
-  ('Pudim de tapioca',           'Calda de coco queimado',                     'Sobremesas', 28.00),
-  ('Brownie quente',             'Sorvete de doce de leite',                   'Sobremesas', 32.00),
-  ('Frutas da estação',          'Com hortelã e mel',                          'Sobremesas', 24.00),
-  ('Água mineral',               'Com ou sem gás, 500 ml',                     'Bebidas',     8.00),
-  ('Suco natural',               'Laranja, abacaxi com hortelã ou maracujá',   'Bebidas',    14.00),
-  ('Caipirinha de limão',        'Cachaça artesanal',                          'Bebidas',    26.00),
-  ('Taça de vinho da casa',      'Tinto ou branco',                            'Bebidas',    32.00),
-  ('Café espresso',              null,                                         'Bebidas',     8.00)
-) as v(nome, descricao, categoria, preco)
+  ('Pão de fermentação natural', 'Manteiga de ervas e flor de sal',            'Entradas',   22.00, 8, 15),
+  ('Bolinho de bacalhau',        '6 unidades, aioli de limão',                 'Entradas',   38.00, 8, 15),
+  ('Carpaccio de beterraba',     'Beterraba assada na brasa, queijo de cabra', 'Entradas',   34.00, 8, 15),
+  ('Peixe do dia na brasa',      'Purê de mandioquinha e farofa de castanhas', 'Principais', 89.00, 20, 35),
+  ('Ancho na brasa',             '350 g, chimichurri e batatas rústicas',      'Principais',112.00, 20, 35),
+  ('Risoto de cogumelos',        'Shiitake, shimeji e parmesão',               'Principais', 76.00, 20, 35),
+  ('Polvo grelhado',             'Batatas ao murro e páprica defumada',        'Principais',118.00, 20, 35),
+  ('Nhoque de abóbora',          'Manteiga de sálvia e amêndoas',              'Principais', 64.00, 20, 35),
+  ('Pudim de tapioca',           'Calda de coco queimado',                     'Sobremesas', 28.00, 5, 10),
+  ('Brownie quente',             'Sorvete de doce de leite',                   'Sobremesas', 32.00, 5, 10),
+  ('Frutas da estação',          'Com hortelã e mel',                          'Sobremesas', 24.00, 5, 10),
+  ('Água mineral',               'Com ou sem gás, 500 ml',                     'Bebidas',     8.00, 2, 5),
+  ('Suco natural',               'Laranja, abacaxi com hortelã ou maracujá',   'Bebidas',    14.00, 2, 5),
+  ('Caipirinha de limão',        'Cachaça artesanal',                          'Bebidas',    26.00, 2, 5),
+  ('Taça de vinho da casa',      'Tinto ou branco',                            'Bebidas',    32.00, 2, 5),
+  ('Café espresso',              null,                                         'Bebidas',     8.00, 2, 5)
+) as v(nome, descricao, categoria, preco, tempo_min, tempo_max)
 where not exists (select 1 from public.cardapio);
