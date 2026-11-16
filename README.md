@@ -1,0 +1,33 @@
+# Âmbar · Controle de Mesas
+
+Aplicação web para controle de mesas de restaurante, com login (e-mail, Google e GitHub), anotação de pedidos pelo garçom e painel da cozinha em tempo real. Usa **Supabase** como banco de dados e autenticação.
+
+> Âmbar é um restaurante fictício. Nome e logo foram criados para este projeto.
+
+## Funções
+
+| Função | O que vê |
+|---|---|
+| **Garçom** | Salão (mapa de mesas), anotação de pedidos com observações por item, comanda, entrega e fechamento de conta |
+| **Cozinha** | Kanban de produção: *Na fila → No fogo → Prontos*, com cronômetro de espera e alerta sonoro |
+| **Gerência** | Tudo acima, mais a tela **Equipe** para definir a função de cada pessoa |
+
+A primeira conta criada vira **Gerência** automaticamente; as seguintes entram como **Garçom**.
+
+## Arquivos
+
+- `index.html`: a aplicação inteira (HTML, CSS e JS num arquivo só)
+- `schema.sql`: tabelas, regras de segurança (RLS), funções e dados iniciais (12 mesas e cardápio)
+
+## Configuração
+
+1. **Banco:** no Supabase, abra **SQL Editor**, cole o conteúdo de `schema.sql` e clique em **Run**.
+2. **Chaves:** em `index.html`, preencha `CONFIG.SUPABASE_URL` e `CONFIG.SUPABASE_KEY` (botão **Connect** no topo do projeto, ou *Project Settings → API Keys*). Use só a chave **publishable/anon**, nunca a `service_role`/secret.
+3. **URLs de retorno:** em *Authentication → URL Configuration*, defina **Site URL** como `https://pedrofxt.github.io/restaurante/` e adicione a mesma URL em **Redirect URLs**.
+4. **Login social (opcional):** em *Authentication → Sign In / Providers*, ative **Google** e/ou **GitHub** com o Client ID e o Secret de cada um. A URL de callback a cadastrar no Google Cloud / GitHub OAuth App é `https://SEU-PROJETO.supabase.co/auth/v1/callback`.
+
+Sem as chaves preenchidas, o site roda em **modo demonstração**: os dados ficam só no navegador, e duas abas (uma como Garçom, outra como Cozinha) se sincronizam entre si.
+
+## Publicação
+
+Publicado via GitHub Pages a partir da branch `main`: https://pedrofxt.github.io/restaurante/
