@@ -16,7 +16,7 @@ Todos têm a tela **Perfil**: trocar foto, nome, e-mail e senha, ligar ou deslig
 
 Na mesa, o garçom ajusta quantos **lugares** ela tem e quantas **pessoas** estão sentadas. Cada pedido mostra a **previsão de preparo**, calculada a partir dos tempos dos produtos. O cronômetro da cozinha fica amarelo ao passar do tempo mínimo e vermelho ao passar do máximo.
 
-**Cadastro:** a primeira conta criada vira **Gerência**. No cadastro por e-mail, cada pessoa escolhe **Garçom** ou **Cozinha**; quem entra pelo Google escolhe no primeiro acesso. A gerência pode mudar a função depois, na tela Equipe.
+**Cadastro:** a primeira conta criada vira **Gerência**. No cadastro por e-mail, cada pessoa escolhe **Garçom** ou **Cozinha**; quem entra pelo Google escolhe no primeiro acesso. A gerência pode mudar a função depois, na tela Equipe. Para garantir que um e-mail sempre entre como Gerência, rode no SQL Editor: `insert into public.emails_gerencia (email) values ('email@exemplo.com');`
 
 ## Arquivos
 

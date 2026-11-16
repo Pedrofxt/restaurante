@@ -53,6 +53,13 @@ create table if not exists public.itens_pedido (
   observacao  text
 );
 
+-- E-mails que sempre entram como Gerência (lista guardada só no banco, invisível para o app)
+create table if not exists public.emails_gerencia (
+  email text primary key check (email = lower(email))
+);
+alter table public.emails_gerencia enable row level security;
+revoke all on public.emails_gerencia from anon, authenticated;
+
 -- Colunas adicionadas depois da primeira versão (seguro rodar de novo)
 alter table public.profiles add column if not exists precisa_papel boolean not null default false;
 alter table public.cardapio add column if not exists foto_url text;
@@ -80,6 +87,7 @@ $$;
 
 -- Cria o perfil automaticamente no cadastro (e-mail ou Google).
 --   • A primeira conta do sistema vira Gerência (admin).
+--   • E-mails cadastrados em emails_gerencia também viram Gerência.
 --   • No cadastro por e-mail a pessoa escolhe Garçom ou Cozinha.
 --   • No Google a escolha é feita no primeiro acesso (precisa_papel = true).
 create or replace function public.handle_new_user()
@@ -87,6 +95,7 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare
   v_primeiro boolean := not exists (select 1 from public.profiles);
   v_escolha  text    := new.raw_user_meta_data->>'papel';
+  v_gerente  boolean := exists (select 1 from public.emails_gerencia where email = lower(new.email));
 begin
   insert into public.profiles (id, nome, avatar_url, papel, precisa_papel)
   values (
@@ -96,10 +105,10 @@ begin
              new.raw_user_meta_data->>'user_name',
              split_part(new.email, '@', 1)),
     coalesce(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture'),
-    case when v_primeiro then 'admin'
+    case when v_primeiro or v_gerente then 'admin'
          when v_escolha in ('garcom','cozinha') then v_escolha
          else 'garcom' end,
-    not v_primeiro and coalesce(v_escolha, '') not in ('garcom','cozinha')
+    not v_primeiro and not v_gerente and coalesce(v_escolha, '') not in ('garcom','cozinha')
   )
   on conflict (id) do nothing;
   return new;
@@ -320,6 +329,14 @@ create policy "produtos: equipe atualiza" on storage.objects for update to authe
   with check (bucket_id = 'produtos' and (select public.meu_papel()) in ('admin','cozinha'));
 create policy "produtos: equipe apaga" on storage.objects for delete to authenticated
   using (bucket_id = 'produtos' and (select public.meu_papel()) in ('admin','cozinha'));
+
+-- Aplica a lista de gerência a contas que já existem
+update public.profiles p
+   set papel = 'admin', precisa_papel = false
+  from auth.users u
+ where u.id = p.id
+   and lower(u.email) in (select email from public.emails_gerencia)
+   and (p.papel <> 'admin' or p.precisa_papel);
 
 -- ---------- Dados iniciais ---------------------------------------------
 insert into public.mesas (numero, lugares) values
