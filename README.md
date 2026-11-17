@@ -12,6 +12,8 @@ Aplicação web para controle de mesas de restaurante, com login (e-mail e Googl
 | **Cozinha** | Kanban de produção: *Na fila → No fogo → Prontos*, com cronômetro de espera e alerta sonoro |
 | **Gerência** | Tudo acima, mais a tela **Equipe** para definir a função de cada pessoa |
 
+O site tem **modo claro e escuro**: o botão de sol/lua no topo (e na tela de login) alterna entre os dois, e em Perfil → Aparência dá para escolher *Automático*, que segue o tema do aparelho.
+
 Todos têm a tela **Perfil**: trocar foto, nome, e-mail e senha, ligar ou desligar os sons e sair (inclusive de todos os aparelhos). **Cozinha** e **Gerência** também acessam o **Cardápio**, onde cadastram produtos com foto, preço, categoria e tempo mínimo e máximo de espera, e marcam itens como indisponíveis.
 
 Na mesa, o garçom ajusta quantos **lugares** ela tem e quantas **pessoas** estão sentadas. A **Gerência** adiciona mesas novas (card *Nova mesa* no Salão) e exclui mesas pela lixeira dentro de cada uma; só é possível excluir depois que a conta da mesa foi fechada. Cada pedido mostra a **previsão de preparo**, calculada a partir dos tempos dos produtos. O cronômetro da cozinha fica amarelo ao passar do tempo mínimo e vermelho ao passar do máximo.
