@@ -9,6 +9,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read
 
 concurrency:
   group: pages
@@ -37,5 +38,17 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Se o Pages ainda estiver em "Deploy from a branch", o GitHub também publica a pasta crua.
+      # Esperamos esse deploy terminar para que o build do React seja sempre o último a entrar no ar.
+      - name: Aguardar o deploy automático do GitHub (se houver)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            pend=$(gh run list -R "$GITHUB_REPOSITORY" --workflow pages-build-deployment --commit "$GITHUB_SHA" --json status -q '[.[] | select(.status != "completed")] | length' 2>/dev/null || echo 0)
+            total=$(gh run list -R "$GITHUB_REPOSITORY" --workflow pages-build-deployment --commit "$GITHUB_SHA" --json status -q 'length' 2>/dev/null || echo 0)
+            if [ "$i" -ge 3 ] && [ "${pend:-0}" = "0" ]; then echo "Pronto (execuções do GitHub para este commit: $total)"; break; fi
+            sleep 10
+          done
       - id: deployment
         uses: actions/deploy-pages@v4
