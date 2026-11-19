@@ -14,6 +14,10 @@ import Cozinha from '../views/Cozinha.jsx';
 import Produtos from '../views/Produtos.jsx';
 import Equipe from '../views/Equipe.jsx';
 import Perfil from '../views/Perfil.jsx';
+import Fila from '../views/Fila.jsx';
+import Gorjetas from '../views/Gorjetas.jsx';
+import PedidoEditor from '../drawers/PedidoEditor.jsx';
+import { ShellCtx } from '../shellContext.js';
 import MesaDrawer from '../drawers/MesaDrawer.jsx';
 import ProdutoForm from '../drawers/ProdutoForm.jsx';
 import NovaMesaForm from '../drawers/NovaMesaForm.jsx';
@@ -73,7 +77,9 @@ export default function Shell() {
   const clearDraft = id => setDrafts(d => { const n = { ...d }; delete n[id]; return n; });
 
   const viewEl = {
-    salao: <Salao filtro={filtro} setFiltro={f => { setFiltro(f); reanimar(); }} onOpenMesa={id => abrir('mesa', id)} onNovaMesa={() => abrir('novaMesa')} />,
+    salao: <Salao filtro={filtro} setFiltro={f => { setFiltro(f); reanimar(); }} onOpenMesa={id => abrir('mesa', { id })} onNovaMesa={() => abrir('novaMesa')} />,
+    fila: <Fila />,
+    gorjetas: <Gorjetas />,
     pedidos: <Pedidos />,
     cozinha: <Cozinha />,
     produtos: <Produtos onNovo={p => abrir('produto', p)} onEditar={p => abrir('produto', p)} />,
@@ -82,13 +88,14 @@ export default function Shell() {
   }[atual];
 
   let drawerEl = null;
-  if (drawer.type === 'mesa') drawerEl = <MesaDrawer key={drawer.seq} mesaId={drawer.payload} onClose={fechar}
-    draft={draftOf(drawer.payload)} setDraft={fn => setDraft(drawer.payload, fn)} clearDraft={() => clearDraft(drawer.payload)} />;
+  if (drawer.type === 'mesa') { const id = drawer.payload.id; drawerEl = <MesaDrawer key={drawer.seq} mesaId={id} abaInicial={drawer.payload.aba} onClose={fechar}
+    draft={draftOf(id)} setDraft={fn => setDraft(id, fn)} clearDraft={() => clearDraft(id)} />; }
+  if (drawer.type === 'pedido') drawerEl = <PedidoEditor key={drawer.seq} pedidoId={drawer.payload.id} voltarMesa={drawer.payload.voltarMesa} onClose={fechar} />;
   if (drawer.type === 'produto') drawerEl = <ProdutoForm key={drawer.seq} inicial={drawer.payload} onClose={fechar} />;
   if (drawer.type === 'novaMesa') drawerEl = <NovaMesaForm key={drawer.seq} onClose={fechar} onCriada={() => { setFiltro('todas'); reanimar(); }} />;
 
   return (
-    <>
+    <ShellCtx.Provider value={{ abrir }}>
       <div className="shell" id="shell">
         <nav className="rail">
           <div className="rail-logo"><Logo size={38} /></div>
@@ -120,6 +127,6 @@ export default function Shell() {
       </div>
       <div className="overlay" onClick={fechar} />
       <aside className="drawer" id="drawer" aria-label="Detalhes">{drawerEl}</aside>
-    </>
+    </ShellCtx.Provider>
   );
 }

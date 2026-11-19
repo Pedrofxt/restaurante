@@ -2,8 +2,10 @@ export const ROLES = { garcom: 'Garçom', cozinha: 'Cozinha', admin: 'Gerência'
 export const VIEWS = {
   salao:    { label: 'Salão',    icon: 'grid',    roles: ['garcom', 'admin'] },
   pedidos:  { label: 'Pedidos',  icon: 'receipt', roles: ['garcom', 'admin'] },
+  fila:     { label: 'Fila',     icon: 'list',    roles: ['garcom', 'cozinha', 'admin'] },
   cozinha:  { label: 'Cozinha',  icon: 'flame',   roles: ['cozinha', 'admin'] },
   produtos: { label: 'Cardápio', icon: 'book',    roles: ['cozinha', 'admin'] },
+  gorjetas: { label: 'Gorjetas', icon: 'coin',    roles: ['admin'] },
   equipe:   { label: 'Equipe',   icon: 'users',   roles: ['admin'] },
   perfil:   { label: 'Perfil',   icon: 'user',    roles: ['garcom', 'cozinha', 'admin'] },
 };

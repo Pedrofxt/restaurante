@@ -29,9 +29,13 @@ function useConfirm() {
   return [on, setOn];
 }
 
-export default function MesaDrawer({ mesaId, onClose, draft, setDraft, clearDraft }) {
+const GORJETAS = [[0, 'Sem'], [10, '10%'], [12, '12%'], [15, '15%'], ['outro', 'Outro']];
+
+export default function MesaDrawer({ mesaId, abaInicial = 'novo', onClose, draft, setDraft, clearDraft }) {
   const { mesas, pedidos, cardapio, can, refresh, salvarMesaInfo } = useApp();
-  const [aba, setAba] = useState('novo');
+  const [aba, setAba] = useState(abaInicial);
+  const [gorjPct, setGorjPct] = useState(10);
+  const [gorjOutro, setGorjOutro] = useState('');
   const [cat, setCat] = useState('Todos');
   const [notas, setNotas] = useState({});
   const [confirmFechar, setConfirmFechar] = useConfirm();
@@ -98,13 +102,16 @@ export default function MesaDrawer({ mesaId, onClose, draft, setDraft, clearDraf
   };
 
   /* ---------- comanda ---------- */
+  const consumo = totalMesa(pedidos, m.id);
+  const gorjeta = gorjPct === 'outro'
+    ? Math.max(0, Math.round(Number(String(gorjOutro).replace(',', '.')) * 100) / 100 || 0)
+    : Math.round(consumo * gorjPct) / 100;
   const fechar = async () => {
     if (pend) { toast('Ainda há pedidos não entregues nesta mesa.', 'warn'); return; }
     if (!confirmFechar) { setConfirmFechar(true); return; }
-    const t = totalMesa(pedidos, m.id);
     setConfirmFechar(false);
-    await api.fecharMesa(m.id);
-    toast(`Conta fechada · Mesa ${pad(m.numero)} · ${brl(t)}`, 'ok');
+    await api.fecharMesa(m.id, gorjeta);
+    toast(`Conta fechada · Mesa ${pad(m.numero)} · ${brl(consumo + gorjeta)}${gorjeta ? ` (gorjeta ${brl(gorjeta)})` : ''}`, 'ok');
     onClose(); await refresh();
   };
 
@@ -182,7 +189,17 @@ export default function MesaDrawer({ mesaId, onClose, draft, setDraft, clearDraf
           : <div className="empty"><Icon name="receipt" size={30} /><p>Nenhum pedido aberto nesta mesa.</p></div>}
       </div>
       <div className="cart">
-        <div className="total-row"><span>Total da mesa</span><strong>{brl(totalMesa(pedidos, m.id))}</strong></div>
+        {(ps.length > 0) && (
+          <div className="tip-box">
+            <div className="tip-head"><span>Gorjeta do garçom</span><b>{brl(gorjeta)}</b></div>
+            <div className="seg tip-seg">
+              {GORJETAS.map(([k, l]) => <button key={k} className={gorjPct === k ? 'on' : ''} onClick={() => setGorjPct(k)}>{l}</button>)}
+            </div>
+            {gorjPct === 'outro' && <input className="tip-outro" type="number" min="0" step="0.01" inputMode="decimal" autoFocus value={gorjOutro} onChange={e => setGorjOutro(e.target.value)} placeholder="Valor da gorjeta (R$)" />}
+          </div>
+        )}
+        <div className="sub-row"><span>Consumo</span><span>{brl(consumo)}</span></div>
+        <div className="total-row"><span>Total{gorjeta ? ' com gorjeta' : ''}</span><strong>{brl(consumo + gorjeta)}</strong></div>
         <AsyncButton className={`btn ${confirmFechar ? 'btn-danger' : 'btn-primary'} btn-block`} disabled={!(ps.length || m.status !== 'livre')} onClick={fechar}>
           <Icon name="check" size={16} /><span>{confirmFechar ? 'Toque de novo para confirmar' : pend ? 'Há pedidos em andamento' : 'Fechar conta e liberar mesa'}</span>
         </AsyncButton>

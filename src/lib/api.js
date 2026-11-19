@@ -33,7 +33,18 @@ export function supaApi(sb) {
       else if (!m.aberta_em) patch.aberta_em = new Date().toISOString();
       ok(await sb.from('mesas').update(patch).eq('id', m.id));
     },
-    async fecharMesa(id) { ok(await sb.rpc('fechar_mesa', { p_mesa: id })); },
+    async fecharMesa(id, gorjeta = 0) { ok(await sb.rpc('fechar_mesa', { p_mesa: id, p_gorjeta: gorjeta || 0 })); },
+    async editarItem(id, qtd, obs) { ok(await sb.rpc('editar_item', { p_item: id, p_qtd: qtd, p_obs: obs || '' })); },
+    async cancelarItem(id) { ok(await sb.rpc('cancelar_item', { p_item: id })); },
+    async adicionarItens(pedidoId, itens) { ok(await sb.rpc('adicionar_itens', { p_pedido: pedidoId, p_itens: itens })); },
+    async listGorjetas(desde) {
+      let q = sb.from('gorjetas').select('*, garcom:profiles(nome, avatar_url)').order('criado_em', { ascending: false });
+      if (desde) q = q.gte('criado_em', desde);
+      return ok(await q);
+    },
+    async repassarGorjetas(ids, repassado = true) { ok(await sb.from('gorjetas').update({ repassado, repassado_em: repassado ? new Date().toISOString() : null }).in('id', ids)); },
+    async lancarGorjeta(g) { ok(await sb.from('gorjetas').insert({ garcom_id: g.garcom_id, valor: g.valor, observacao: g.observacao || null, base: 0 })); },
+    async excluirGorjeta(id) { ok(await sb.from('gorjetas').delete().eq('id', id)); },
     async setMesaInfo(id, patch) { ok(await sb.from('mesas').update(patch).eq('id', id)); },
     async criarMesa(m) { ok(await sb.from('mesas').insert({ numero: m.numero, lugares: m.lugares })); },
     async excluirMesa(id) { ok(await sb.from('mesas').delete().eq('id', id)); },
@@ -103,7 +114,7 @@ export function demoApi() {
     ['Café espresso', null, 'Bebidas', 8],
   ].map(([nome, descricao, categoria, preco], i) => ({ id: i + 1, nome, descricao, categoria, preco, ativo: true, foto_url: null, tempo_min: TEMPOS[categoria][0], tempo_max: TEMPOS[categoria][1] }));
   const seed = () => ({
-    seq: 100,
+    seq: 100, seqItem: 100000, gorjetas: [],
     mesas: [2, 2, 4, 4, 4, 6, 2, 4, 4, 6, 8, 2].map((lugares, i) => ({ id: i + 1, numero: i + 1, lugares, pessoas: 0, status: 'livre', garcom_id: null, aberta_em: null })),
     cardapio: CARDAPIO,
     pedidos: [],
@@ -113,7 +124,11 @@ export function demoApi() {
       { id: 'demo-cozinha', nome: 'Chef Marina', papel: 'cozinha', avatar_url: null },
     ],
   });
-  const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || seed(); } catch { return seed(); } };
+  const load = () => {
+    let d; try { d = JSON.parse(localStorage.getItem(KEY)); } catch {}
+    d ||= seed(); d.gorjetas ||= []; d.seqItem ||= 100000;
+    return d;
+  };
   let db = load();
   const subs = new Set();
   const commit = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} subs.forEach(f => f()); };
@@ -155,7 +170,7 @@ export function demoApi() {
       db.pedidos.push({
         id, mesa_id: mesaId, garcom_id: s.user.id, garcom: { nome: s.profile.nome }, status: 'novo',
         observacao: obs?.trim() || null, pago: false, criado_em: t, atualizado_em: t,
-        itens: itens.map((it, k) => { const c = db.cardapio.find(c => c.id === it.item_id); return { id: id * 100 + k, pedido_id: id, item_id: c.id, nome: c.nome, preco: c.preco, quantidade: it.qtd, observacao: it.obs?.trim() || null }; }),
+        itens: itens.map((it, k) => { const c = db.cardapio.find(c => c.id === it.item_id); return { id: id * 100 + k, pedido_id: id, item_id: c.id, nome: c.nome, preco: c.preco, quantidade: it.qtd, observacao: it.obs?.trim() || null, status: 'ativo', adicionado_em: null, alterado_em: null }; }),
       });
       const m = db.mesas.find(m => m.id === mesaId);
       if (['livre', 'reservada'].includes(m.status)) m.status = 'ocupada';
@@ -169,7 +184,67 @@ export function demoApi() {
       if (status === 'livre' || status === 'reservada') { m.aberta_em = null; m.garcom_id = null; m.pessoas = 0; } else m.aberta_em ||= now();
       commit();
     },
-    async fecharMesa(id) { db.pedidos.forEach(p => { if (p.mesa_id === id) p.pago = true; }); const m = db.mesas.find(m => m.id === id); Object.assign(m, { status: 'livre', aberta_em: null, garcom_id: null, pessoas: 0 }); commit(); },
+    async fecharMesa(id, gorjeta = 0) {
+      const m = db.mesas.find(m => m.id === id);
+      const abertos = db.pedidos.filter(p => p.mesa_id === id && !p.pago && p.status !== 'cancelado');
+      const sub = p => (p.itens || []).filter(i => i.status !== 'cancelado').reduce((s, i) => s + i.quantidade * i.preco, 0);
+      const gorj = Math.round(Math.max(0, Number(gorjeta) || 0) * 100) / 100;
+      if (gorj > 0) {
+        const porGarcom = new Map();
+        abertos.forEach(p => porGarcom.set(p.garcom_id, (porGarcom.get(p.garcom_id) || 0) + sub(p)));
+        const base = [...porGarcom.values()].reduce((a, b) => a + b, 0);
+        const agora = now();
+        const nomeDe = uid => db.perfis.find(x => x.id === uid)?.nome || 'Garçom';
+        if (base > 0) {
+          const linhas = [...porGarcom.entries()].sort((a, b) => b[1] - a[1]).map(([uid, v]) => ({ uid, v, val: Math.round(gorj * v / base * 100) / 100 }));
+          const resto = Math.round((gorj - linhas.reduce((s, l) => s + l.val, 0)) * 100) / 100;
+          linhas[0].val = Math.round((linhas[0].val + resto) * 100) / 100;
+          linhas.forEach(l => db.gorjetas.push({ id: ++db.seq, garcom_id: l.uid, garcom: { nome: nomeDe(l.uid) }, mesa_numero: m.numero, base: l.v, percentual: Math.round(gorj * 10000 / base) / 100, valor: l.val, observacao: null, repassado: false, repassado_em: null, criado_em: agora }));
+        } else {
+          const uid = m.garcom_id || getSess()?.user.id;
+          db.gorjetas.push({ id: ++db.seq, garcom_id: uid, garcom: { nome: nomeDe(uid) }, mesa_numero: m.numero, base: 0, percentual: null, valor: gorj, observacao: null, repassado: false, repassado_em: null, criado_em: agora });
+        }
+      }
+      db.pedidos.forEach(p => { if (p.mesa_id === id) p.pago = true; });
+      Object.assign(m, { status: 'livre', aberta_em: null, garcom_id: null, pessoas: 0 });
+      commit();
+    },
+    async editarItem(itemId, qtd, obs) {
+      const p = db.pedidos.find(p => !p.pago && p.itens.some(i => i.id === itemId && i.status !== 'cancelado'));
+      if (!p) throw new Error('Item não encontrado');
+      if (!['novo', 'preparando'].includes(p.status)) throw new Error('Este pedido já saiu da cozinha e não pode mais ser alterado');
+      if (!(qtd >= 1 && qtd <= 99)) throw new Error('Quantidade inválida');
+      Object.assign(p.itens.find(i => i.id === itemId), { quantidade: qtd, observacao: obs?.trim() || null, alterado_em: now() });
+      p.atualizado_em = now(); commit();
+    },
+    async cancelarItem(itemId) {
+      const p = db.pedidos.find(p => !p.pago && p.itens.some(i => i.id === itemId && i.status !== 'cancelado'));
+      if (!p) throw new Error('Item não encontrado');
+      if (!['novo', 'preparando'].includes(p.status)) throw new Error('Este pedido já saiu da cozinha e não pode mais ser alterado');
+      Object.assign(p.itens.find(i => i.id === itemId), { status: 'cancelado', alterado_em: now() });
+      if (!p.itens.some(i => i.status !== 'cancelado')) p.status = 'cancelado';
+      p.atualizado_em = now(); commit();
+    },
+    async adicionarItens(pedidoId, itens) {
+      const p = db.pedidos.find(p => p.id === pedidoId && !p.pago);
+      if (!p) throw new Error('Pedido não encontrado');
+      if (!['novo', 'preparando', 'pronto'].includes(p.status)) throw new Error('Este pedido já foi entregue ou cancelado: faça um pedido novo');
+      if (!itens?.length) throw new Error('Nenhum item para adicionar');
+      const t = now();
+      itens.forEach(it => {
+        const c = db.cardapio.find(c => c.id === it.item_id && c.ativo); if (!c) return;
+        p.itens.push({ id: ++db.seqItem, pedido_id: p.id, item_id: c.id, nome: c.nome, preco: c.preco, quantidade: Math.min(99, Math.max(1, it.qtd || 1)), observacao: it.obs?.trim() || null, status: 'ativo', adicionado_em: t, alterado_em: null });
+      });
+      if (p.status === 'pronto') p.status = 'preparando';
+      p.atualizado_em = t; commit();
+    },
+    async listGorjetas(desde) {
+      return structuredClone(db.gorjetas.filter(g => !desde || g.criado_em >= desde).sort((a, b) => (a.criado_em < b.criado_em ? 1 : -1))
+        .map(g => ({ ...g, garcom: { nome: db.perfis.find(x => x.id === g.garcom_id)?.nome || g.garcom?.nome || 'Garçom', avatar_url: db.perfis.find(x => x.id === g.garcom_id)?.avatar_url || null } })));
+    },
+    async repassarGorjetas(ids, repassado = true) { db.gorjetas.forEach(g => { if (ids.includes(g.id)) { g.repassado = repassado; g.repassado_em = repassado ? now() : null; } }); commit(); },
+    async lancarGorjeta(g) { db.gorjetas.push({ id: ++db.seq, garcom_id: g.garcom_id, mesa_numero: null, base: 0, percentual: null, valor: g.valor, observacao: g.observacao || null, repassado: false, repassado_em: null, criado_em: now() }); commit(); },
+    async excluirGorjeta(id) { db.gorjetas = db.gorjetas.filter(g => g.id !== id); commit(); },
     async listPerfis() { return structuredClone(db.perfis); },
     async definirPapel(uid, papel) { const p = db.perfis.find(p => p.id === uid); if (p) p.papel = papel; commit(); },
     async setMesaInfo(id, patch) { Object.assign(db.mesas.find(m => m.id === id), patch); commit(); },

@@ -72,6 +72,32 @@ begin
   begin alter table public.mesas    add constraint mesas_pessoas_ok check (pessoas >= 0 and pessoas <= 99);            exception when duplicate_object then null; end;
 end $$;
 
+-- Itens editáveis depois de enviados (a posição do pedido na fila não muda)
+alter table public.itens_pedido add column if not exists status        text not null default 'ativo';
+alter table public.itens_pedido add column if not exists adicionado_em timestamptz;
+alter table public.itens_pedido add column if not exists alterado_em   timestamptz;
+do $$
+begin
+  begin alter table public.itens_pedido add constraint itens_status_ok check (status in ('ativo','cancelado')); exception when duplicate_object then null; end;
+end $$;
+
+-- Gorjetas dos garçons (visíveis só para a gerência)
+create table if not exists public.gorjetas (
+  id           bigint generated always as identity primary key,
+  garcom_id    uuid references public.profiles(id) on delete set null,
+  mesa_numero  int,
+  base         numeric(10,2) not null default 0,
+  percentual   numeric(6,2),
+  valor        numeric(10,2) not null check (valor >= 0),
+  observacao   text,
+  repassado    boolean not null default false,
+  repassado_em timestamptz,
+  criado_em    timestamptz not null default now(),
+  criado_por   uuid default auth.uid()
+);
+create index if not exists gorjetas_criado_idx on public.gorjetas (criado_em desc);
+create index if not exists gorjetas_garcom_idx on public.gorjetas (garcom_id);
+
 create index if not exists pedidos_mesa_aberta_idx on public.pedidos (mesa_id) where not pago;
 create index if not exists pedidos_criado_idx      on public.pedidos (criado_em desc);
 create index if not exists pedidos_garcom_idx      on public.pedidos (garcom_id);
@@ -140,6 +166,9 @@ returns trigger language plpgsql set search_path = public as $$
 declare r text := public.meu_papel();
 begin
   new.atualizado_em := now();
+  if coalesce(current_setting('ambar.interno', true), '') = '1' then
+    return new;  -- mudança feita por uma função do sistema (ex.: item adicionado a um pedido pronto)
+  end if;
   if new.status is distinct from old.status and r is not null and r <> 'admin' then
     if r = 'cozinha' and (old.status, new.status) not in (('novo','preparando'), ('preparando','pronto')) then
       raise exception 'A cozinha não pode mudar o pedido de % para %', old.status, new.status;
@@ -187,15 +216,114 @@ begin
   return v_id;
 end $$;
 
--- Fecha a conta: marca os pedidos como pagos e libera a mesa.
-create or replace function public.fechar_mesa(p_mesa int)
-returns void language plpgsql security invoker set search_path = public as $$
+-- Fecha a conta: registra a gorjeta (dividida entre os garçons que lançaram pedidos
+-- na mesa, proporcional ao valor de cada um), marca os pedidos como pagos e libera a mesa.
+drop function if exists public.fechar_mesa(int);
+create or replace function public.fechar_mesa(p_mesa int, p_gorjeta numeric default 0)
+returns void language plpgsql security definer set search_path = public as $$
+declare
+  v_num    int;
+  v_garcom uuid;
+  v_base   numeric := 0;
+  v_gorj   numeric := round(greatest(coalesce(p_gorjeta, 0), 0), 2);
 begin
   if public.meu_papel() not in ('garcom','admin') then
     raise exception 'Somente o salão pode fechar contas';
   end if;
+  select numero, garcom_id into v_num, v_garcom from public.mesas where id = p_mesa;
+  if v_num is null then raise exception 'Mesa não encontrada'; end if;
+
+  select coalesce(sum(i.quantidade * i.preco), 0) into v_base
+    from public.pedidos p join public.itens_pedido i on i.pedido_id = p.id
+   where p.mesa_id = p_mesa and not p.pago and p.status <> 'cancelado' and i.status = 'ativo';
+
+  if v_gorj > 0 then
+    if v_base > 0 then
+      with g as (
+        select p.garcom_id, sum(i.quantidade * i.preco) as sub
+          from public.pedidos p join public.itens_pedido i on i.pedido_id = p.id
+         where p.mesa_id = p_mesa and not p.pago and p.status <> 'cancelado' and i.status = 'ativo'
+         group by p.garcom_id
+      ), r as (
+        select garcom_id, sub, round(v_gorj * sub / v_base, 2) as val,
+               row_number() over (order by sub desc) as rn
+          from g
+      )
+      insert into public.gorjetas (garcom_id, mesa_numero, base, percentual, valor)
+      select garcom_id, v_num, sub, round(v_gorj * 100 / v_base, 2),
+             val + case when rn = 1 then v_gorj - (select sum(val) from r) else 0 end
+        from r;
+    else
+      insert into public.gorjetas (garcom_id, mesa_numero, base, percentual, valor)
+      values (coalesce(v_garcom, auth.uid()), v_num, 0, null, v_gorj);
+    end if;
+  end if;
+
   update public.pedidos set pago = true where mesa_id = p_mesa and not pago;
   update public.mesas set status = 'livre', garcom_id = null, aberta_em = null, pessoas = 0 where id = p_mesa;
+end $$;
+
+-- Alterar quantidade/observação de um item já enviado (pedido ainda na cozinha).
+create or replace function public.editar_item(p_item bigint, p_qtd int, p_obs text)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_pedido bigint; v_status text;
+begin
+  if public.meu_papel() not in ('garcom','admin') then raise exception 'Somente o salão pode alterar pedidos'; end if;
+  select p.id, p.status into v_pedido, v_status
+    from public.itens_pedido i join public.pedidos p on p.id = i.pedido_id
+   where i.id = p_item and i.status = 'ativo' and not p.pago;
+  if v_pedido is null then raise exception 'Item não encontrado'; end if;
+  if v_status not in ('novo','preparando') then raise exception 'Este pedido já saiu da cozinha e não pode mais ser alterado'; end if;
+  if p_qtd is null or p_qtd < 1 or p_qtd > 99 then raise exception 'Quantidade inválida'; end if;
+  update public.itens_pedido
+     set quantidade = p_qtd, observacao = nullif(trim(p_obs), ''), alterado_em = now()
+   where id = p_item;
+  perform set_config('ambar.interno', '1', true);
+  update public.pedidos set atualizado_em = now() where id = v_pedido;
+end $$;
+
+-- Cancelar um item específico. Se não sobrar nenhum, o pedido inteiro é cancelado.
+create or replace function public.cancelar_item(p_item bigint)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_pedido bigint; v_status text;
+begin
+  if public.meu_papel() not in ('garcom','admin') then raise exception 'Somente o salão pode cancelar itens'; end if;
+  select p.id, p.status into v_pedido, v_status
+    from public.itens_pedido i join public.pedidos p on p.id = i.pedido_id
+   where i.id = p_item and i.status = 'ativo' and not p.pago;
+  if v_pedido is null then raise exception 'Item não encontrado'; end if;
+  if v_status not in ('novo','preparando') then raise exception 'Este pedido já saiu da cozinha e não pode mais ser alterado'; end if;
+  update public.itens_pedido set status = 'cancelado', alterado_em = now() where id = p_item;
+  perform set_config('ambar.interno', '1', true);
+  if not exists (select 1 from public.itens_pedido where pedido_id = v_pedido and status = 'ativo') then
+    update public.pedidos set status = 'cancelado' where id = v_pedido;
+  else
+    update public.pedidos set atualizado_em = now() where id = v_pedido;
+  end if;
+end $$;
+
+-- Adicionar itens a um pedido já enviado, mantendo a posição dele na fila.
+-- Se o pedido já estava pronto, ele volta para "preparando" por causa dos itens novos.
+create or replace function public.adicionar_itens(p_pedido bigint, p_itens jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_status text;
+begin
+  if public.meu_papel() not in ('garcom','admin') then raise exception 'Somente o salão pode alterar pedidos'; end if;
+  select status into v_status from public.pedidos where id = p_pedido and not pago;
+  if v_status is null then raise exception 'Pedido não encontrado'; end if;
+  if v_status not in ('novo','preparando','pronto') then raise exception 'Este pedido já foi entregue ou cancelado: faça um pedido novo'; end if;
+  if p_itens is null or jsonb_array_length(p_itens) = 0 then raise exception 'Nenhum item para adicionar'; end if;
+  insert into public.itens_pedido (pedido_id, item_id, nome, preco, quantidade, observacao, adicionado_em)
+  select p_pedido, c.id, c.nome, c.preco,
+         least(greatest(coalesce((i->>'qtd')::int, 1), 1), 99),
+         nullif(trim(i->>'obs'), ''), now()
+    from jsonb_array_elements(p_itens) i
+    join public.cardapio c on c.id = (i->>'item_id')::int and c.ativo;
+  perform set_config('ambar.interno', '1', true);
+  update public.pedidos
+     set status = case when status = 'pronto' then 'preparando' else status end,
+         atualizado_em = now()
+   where id = p_pedido;
 end $$;
 
 -- Gerência define a função de cada membro da equipe.
@@ -212,7 +340,10 @@ begin
 end $$;
 
 revoke execute on function public.criar_pedido(int, text, jsonb) from anon;
-revoke execute on function public.fechar_mesa(int)              from anon;
+revoke execute on function public.fechar_mesa(int, numeric)     from anon;
+revoke execute on function public.editar_item(bigint, int, text) from anon;
+revoke execute on function public.cancelar_item(bigint)         from anon;
+revoke execute on function public.adicionar_itens(bigint, jsonb) from anon;
 revoke execute on function public.definir_papel(uuid, text)     from anon;
 revoke execute on function public.escolher_papel(text)          from anon;
 
@@ -284,6 +415,18 @@ create policy "salão cria itens" on public.itens_pedido for insert to authentic
     (select public.meu_papel()) in ('garcom','admin')
     and exists (select 1 from public.pedidos p where p.id = pedido_id and p.garcom_id = (select auth.uid()))
   );
+
+-- Gorjetas: só a gerência vê e mexe (o fechamento de conta grava pela função fechar_mesa)
+alter table public.gorjetas enable row level security;
+drop policy if exists "gerência vê gorjetas"     on public.gorjetas;
+drop policy if exists "gerência lança gorjetas"  on public.gorjetas;
+drop policy if exists "gerência edita gorjetas"  on public.gorjetas;
+drop policy if exists "gerência apaga gorjetas"  on public.gorjetas;
+create policy "gerência vê gorjetas"    on public.gorjetas for select to authenticated using ((select public.meu_papel()) = 'admin');
+create policy "gerência lança gorjetas" on public.gorjetas for insert to authenticated with check ((select public.meu_papel()) = 'admin');
+create policy "gerência edita gorjetas" on public.gorjetas for update to authenticated
+  using ((select public.meu_papel()) = 'admin') with check ((select public.meu_papel()) = 'admin');
+create policy "gerência apaga gorjetas" on public.gorjetas for delete to authenticated using ((select public.meu_papel()) = 'admin');
 
 -- ---------- Tempo real -------------------------------------------------
 do $$

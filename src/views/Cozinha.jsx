@@ -1,4 +1,5 @@
 import { COR_PED } from '../lib/constants.js';
+import { itensAtivos } from '../lib/utils.js';
 import PedidoCard from '../components/PedidoCard.jsx';
 import { Pill, Since, Stat } from '../components/ui.jsx';
 import { useApp } from '../store.jsx';
@@ -9,7 +10,7 @@ export default function Cozinha() {
   const fogo = pedidos.filter(p => p.status === 'preparando');
   const prontos = pedidos.filter(p => p.status === 'pronto');
   const espera = [...fila, ...fogo].sort((a, b) => (a.criado_em < b.criado_em ? -1 : 1))[0];
-  const itensFogo = fogo.reduce((s, p) => s + p.itens.reduce((x, i) => x + i.quantidade, 0), 0);
+  const itensFogo = fogo.reduce((s, p) => s + itensAtivos(p).reduce((x, i) => x + i.quantidade, 0), 0);
   const cols = [['novo', 'Na fila', fila], ['preparando', 'No fogo', fogo], ['pronto', 'Prontos', prontos]];
   return (<>
     <div className="view-head"><div><p className="eyebrow">Cozinha</p><h1>Produção</h1></div></div>

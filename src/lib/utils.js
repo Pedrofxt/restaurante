@@ -14,10 +14,26 @@ export const storagePath = (url, bucket) => { const k = `/object/public/${bucket
 export const blobToDataURL = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
 
 /* Pedidos e mesas */
-export const subtotal = p => (p.itens || []).reduce((s, i) => s + i.quantidade * Number(i.preco), 0);
+export const itensAtivos = p => (p.itens || []).filter(i => i.status !== 'cancelado');
+export const subtotal = p => itensAtivos(p).reduce((s, i) => s + i.quantidade * Number(i.preco), 0);
 export const tempoItem = (cardapio, id) => { const c = cardapio.find(x => x.id === id); return [Number(c?.tempo_min ?? 10), Number(c?.tempo_max ?? 20)]; };
-export const previsao = (cardapio, itens) => itens?.length ? itens.reduce(([a, b], it) => { const [x, y] = tempoItem(cardapio, it.item_id); return [Math.max(a, x), Math.max(b, y)]; }, [0, 0]) : null;
+export const previsao = (cardapio, todos) => { const itens = (todos || []).filter(i => i.status !== 'cancelado'); return itens.length ? itens.reduce(([a, b], it) => { const [x, y] = tempoItem(cardapio, it.item_id); return [Math.max(a, x), Math.max(b, y)]; }, [0, 0]) : null; };
 export const fmtPrev = pr => !pr ? '' : pr[0] === pr[1] ? `${pr[0]} min` : `${pr[0]}–${pr[1]} min`;
+export const hhmm = t => new Date(t).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+/* Hora prevista para o pedido ficar pronto. Cada item conta a partir de quando entrou no pedido
+   (itens adicionados depois começam a contar na hora em que foram adicionados). Os tempos vêm do
+   cardápio atual, então mudar o tempo de um produto atualiza as previsões na hora. */
+export const etaPedido = (cardapio, p) => {
+  const its = itensAtivos(p); if (!its.length) return null;
+  let a = 0, b = 0;
+  for (const it of its) {
+    const ini = new Date(it.adicionado_em || p.criado_em).getTime();
+    const [x, y] = tempoItem(cardapio, it.item_id);
+    a = Math.max(a, ini + x * 60000); b = Math.max(b, ini + y * 60000);
+  }
+  return { min: a, max: b };
+};
+export const minutosAte = t => Math.round((t - Date.now()) / 60000);
 
 export async function resizeImage(file, max = 1000, square = false) {
   if (!file || !/^image\//.test(file.type)) throw new Error('Escolha um arquivo de imagem (JPG, PNG ou WebP).');

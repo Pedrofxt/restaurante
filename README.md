@@ -16,6 +16,12 @@ O site tem **modo claro e escuro**: o botão de sol/lua no topo (e na tela de lo
 
 Todos têm a tela **Perfil**: trocar foto, nome, e-mail e senha, ligar ou desligar os sons e sair (inclusive de todos os aparelhos). **Cozinha** e **Gerência** também acessam o **Cardápio**, onde cadastram produtos com foto, preço, categoria e tempo mínimo e máximo de espera, e marcam itens como indisponíveis.
 
+**Fila de pedidos** (Garçom, Cozinha e Gerência): cada pedido aparece com sua posição na fila da cozinha, o tempo de cada produto, o tempo total e a hora prevista para ficar pronto, com contagem regressiva e alerta de atraso. Dá para ordenar por ordem de chegada, mais demorados ou mais rápidos, e ver a produção agrupada **por produto**. As previsões usam os tempos do cardápio em tempo real: se a cozinha muda o tempo de um prato, todas as previsões se atualizam.
+
+**Editar pedido já enviado** (Garçom e Gerência): alterar quantidade ou observação, cancelar um item específico ou adicionar itens, sem mudar a posição do pedido na fila do restaurante. A cozinha vê as marcações *cancelado*, *alterado* e *+ adicionado*. Itens adicionados contam o tempo a partir de quando entraram; se o pedido já estava pronto, ele volta para a cozinha na mesma posição.
+
+**Gorjetas** (só Gerência): no fechamento da conta o garçom escolhe sem gorjeta, 10%, 12%, 15% ou outro valor. Se mais de um garçom lançou pedidos na mesa, a gorjeta é dividida entre eles na proporção do que cada um lançou. A tela Gorjetas mostra totais por período e por garçom, o que falta repassar (com botão para marcar como repassado) e permite lançar gorjetas avulsas, como as pagas em dinheiro.
+
 Na mesa, o garçom ajusta quantos **lugares** ela tem e quantas **pessoas** estão sentadas. A **Gerência** adiciona mesas novas (card *Nova mesa* no Salão) e exclui mesas pela lixeira dentro de cada uma; só é possível excluir depois que a conta da mesa foi fechada. Cada pedido mostra a **previsão de preparo**, calculada a partir dos tempos dos produtos. O cronômetro da cozinha fica amarelo ao passar do tempo mínimo e vermelho ao passar do máximo.
 
 **Cadastro:** a primeira conta criada vira **Gerência**. No cadastro por e-mail, cada pessoa escolhe **Garçom** ou **Cozinha**; quem entra pelo Google escolhe no primeiro acesso. A gerência pode mudar a função depois, na tela Equipe. Para garantir que um e-mail sempre entre como Gerência, rode no SQL Editor: `insert into public.emails_gerencia (email) values ('email@exemplo.com');`
