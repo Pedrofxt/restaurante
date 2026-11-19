@@ -243,7 +243,9 @@ export function demoApi() {
         .map(g => ({ ...g, garcom: { nome: db.perfis.find(x => x.id === g.garcom_id)?.nome || g.garcom?.nome || 'Garçom', avatar_url: db.perfis.find(x => x.id === g.garcom_id)?.avatar_url || null } })));
     },
     async repassarGorjetas(ids, repassado = true) { db.gorjetas.forEach(g => { if (ids.includes(g.id)) { g.repassado = repassado; g.repassado_em = repassado ? now() : null; } }); commit(); },
-    async lancarGorjeta(g) { db.gorjetas.push({ id: ++db.seq, garcom_id: g.garcom_id, mesa_numero: null, base: 0, percentual: null, valor: g.valor, observacao: g.observacao || null, repassado: false, repassado_em: null, criado_em: now() }); commit(); },
+    async lancarGorjeta(g) {
+      if (db.perfis.find(x => x.id === g.garcom_id)?.papel !== 'garcom') throw new Error('A gorjeta só pode ser lançada para um garçom.');
+      db.gorjetas.push({ id: ++db.seq, garcom_id: g.garcom_id, mesa_numero: null, base: 0, percentual: null, valor: g.valor, observacao: g.observacao || null, repassado: false, repassado_em: null, criado_em: now() }); commit(); },
     async excluirGorjeta(id) { db.gorjetas = db.gorjetas.filter(g => g.id !== id); commit(); },
     async listPerfis() { return structuredClone(db.perfis); },
     async definirPapel(uid, papel) { const p = db.perfis.find(p => p.id === uid); if (p) p.papel = papel; commit(); },

@@ -4,6 +4,9 @@ import { ROLES } from '../lib/constants.js';
 import { traduz } from '../lib/utils.js';
 import { toast } from '../components/Toasts.jsx';
 import { Avatar } from '../components/ui.jsx';
+import { Select } from '../components/Select.jsx';
+
+const OPCOES = Object.entries(ROLES).map(([value, label]) => ({ value, label }));
 import { useApp } from '../store.jsx';
 
 export default function Equipe() {
@@ -24,9 +27,7 @@ export default function Equipe() {
         <div className="member" key={p.id} style={{ '--i': i }}>
           <Avatar p={p} />
           <div className="m-info"><strong>{p.nome}</strong><span className="mute">{p.id === profile.id ? 'Você' : ROLES[p.papel]}</span></div>
-          <select value={p.papel} disabled={p.id === profile.id} aria-label="Função" onChange={e => mudar(p.id, e.target.value)}>
-            {Object.entries(ROLES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
+          <div className="member-sel"><Select value={p.papel} options={OPCOES} size="sm" disabled={p.id === profile.id} aria-label={`Função de ${p.nome}`} onChange={v => mudar(p.id, v)} /></div>
         </div>
       ))}
     </div>

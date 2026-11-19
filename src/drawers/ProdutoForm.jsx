@@ -5,6 +5,7 @@ import { resizeImage, traduz } from '../lib/utils.js';
 import { Icon } from '../components/Icons.jsx';
 import { toast } from '../components/Toasts.jsx';
 import { AsyncButton } from '../components/ui.jsx';
+import { Combo } from '../components/Select.jsx';
 import { useApp } from '../store.jsx';
 
 export default function ProdutoForm({ inicial: p, onClose }) {
@@ -73,8 +74,7 @@ export default function ProdutoForm({ inicial: p, onClose }) {
         <label className="field"><span>Nome</span><input ref={nomeRef} name="nome" required maxLength={80} defaultValue={p.nome || ''} placeholder="Ex.: Moqueca de banana-da-terra" /></label>
         <label className="field"><span>Descrição</span><textarea name="descricao" rows={2} maxLength={200} defaultValue={p.descricao || ''} placeholder="Ingredientes, acompanhamentos…" /></label>
         <div className="two">
-          <label className="field"><span>Categoria</span><input name="categoria" required maxLength={40} list="catList" defaultValue={p.categoria || ''} placeholder="Principais" />
-            <datalist id="catList">{cats.map(c => <option key={c} value={c} />)}</datalist></label>
+          <label className="field"><span>Categoria</span><Combo name="categoria" required maxLength={40} defaultValue={p.categoria || ''} placeholder="Principais" options={cats} /></label>
           <label className="field"><span>Preço (R$)</span><input name="preco" type="number" inputMode="decimal" min="0" step="0.01" required defaultValue={p.preco ?? ''} placeholder="0,00" /></label>
         </div>
         <div className="two">

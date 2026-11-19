@@ -423,9 +423,17 @@ drop policy if exists "gerência lança gorjetas"  on public.gorjetas;
 drop policy if exists "gerência edita gorjetas"  on public.gorjetas;
 drop policy if exists "gerência apaga gorjetas"  on public.gorjetas;
 create policy "gerência vê gorjetas"    on public.gorjetas for select to authenticated using ((select public.meu_papel()) = 'admin');
-create policy "gerência lança gorjetas" on public.gorjetas for insert to authenticated with check ((select public.meu_papel()) = 'admin');
+-- Gorjeta avulsa só pode ser lançada para quem tem a função Garçom
+create policy "gerência lança gorjetas" on public.gorjetas for insert to authenticated
+  with check (
+    (select public.meu_papel()) = 'admin'
+    and exists (select 1 from public.profiles pr where pr.id = garcom_id and pr.papel = 'garcom')
+  );
 create policy "gerência edita gorjetas" on public.gorjetas for update to authenticated
   using ((select public.meu_papel()) = 'admin') with check ((select public.meu_papel()) = 'admin');
+-- A gerência só marca como repassado ou ajusta a observação; não troca o garçom nem o valor
+revoke update on public.gorjetas from authenticated, anon;
+grant  update (repassado, repassado_em, observacao) on public.gorjetas to authenticated;
 create policy "gerência apaga gorjetas" on public.gorjetas for delete to authenticated using ((select public.meu_papel()) = 'admin');
 
 -- ---------- Tempo real -------------------------------------------------

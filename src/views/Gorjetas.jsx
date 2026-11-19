@@ -4,6 +4,7 @@ import { brl, first, pad, traduz } from '../lib/utils.js';
 import { Icon } from '../components/Icons.jsx';
 import { toast } from '../components/Toasts.jsx';
 import { AsyncButton, Avatar, Pill, Stat } from '../components/ui.jsx';
+import { Select } from '../components/Select.jsx';
 import { useApp } from '../store.jsx';
 
 const PERIODOS = [['hoje', 'Hoje'], ['7', '7 dias'], ['30', '30 dias'], ['tudo', 'Tudo']];
@@ -22,6 +23,7 @@ export default function Gorjetas() {
   const [perfis, setPerfis] = useState([]);
   const [filtro, setFiltro] = useState('todas');
   const [busy, setBusy] = useState(false);
+  const [garcomSel, setGarcomSel] = useState('');
 
   const carregar = () => api.listGorjetas(desde(per)).then(setLista).catch(e => toast(traduz(e), 'err'));
   useEffect(() => { carregar(); }, [per, version]); // eslint-disable-line
@@ -63,15 +65,16 @@ export default function Gorjetas() {
     const valor = Math.round(Number(String(fd.get('valor')).replace(',', '.')) * 100) / 100;
     try {
       if (!fd.get('garcom')) throw new Error('Escolha o garçom.');
+      if (!garcons.some(p => p.id === fd.get('garcom'))) throw new Error('A gorjeta só pode ser lançada para um garçom.');
       if (!(valor > 0)) throw new Error('Informe um valor maior que zero.');
       setBusy(true);
       await api.lancarGorjeta({ garcom_id: fd.get('garcom'), valor, observacao: String(fd.get('obs') || '').trim() });
-      f.reset(); toast('Gorjeta lançada', 'ok'); await carregar();
+      f.reset(); setGarcomSel(''); toast('Gorjeta lançada', 'ok'); await carregar();
     } catch (err) { toast(traduz(err), 'err'); }
     finally { setBusy(false); }
   };
 
-  const equipeSalao = perfis.filter(p => p.papel === 'garcom' || p.papel === 'admin');
+  const garcons = perfis.filter(p => p.papel === 'garcom');
 
   return (<>
     <div className="view-head"><div><p className="eyebrow">Gerência · só você vê esta tela</p><h1>Gorjetas</h1></div>
@@ -98,9 +101,11 @@ export default function Gorjetas() {
     </div>
 
     <div className="card" style={{ '--i': 2, marginBottom: 22 }}>
-      <h3>Lançar gorjeta avulsa</h3><p className="sub">Para gorjetas em dinheiro ou ajustes que não passaram pelo fechamento da conta.</p>
+      <h3>Lançar gorjeta avulsa</h3><p className="sub">Para gorjetas em dinheiro ou ajustes que não passaram pelo fechamento da conta. Só pode ser lançada para quem tem a função <b>Garçom</b>.</p>
       <form className="tip-form" onSubmit={lancar}>
-        <label className="field"><span>Garçom</span><select name="garcom" defaultValue=""><option value="" disabled>Escolha…</option>{equipeSalao.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select></label>
+        <div className="field"><span>Garçom</span><Select name="garcom" value={garcomSel} onChange={setGarcomSel} aria-label="Garçom"
+          placeholder={garcons.length ? 'Escolha o garçom…' : 'Nenhum garçom cadastrado'} disabled={!garcons.length}
+          options={garcons.map(p => ({ value: p.id, label: p.nome }))} /></div>
         <label className="field"><span>Valor (R$)</span><input name="valor" type="number" min="0.01" step="0.01" inputMode="decimal" required placeholder="0,00" /></label>
         <label className="field"><span>Observação</span><input name="obs" maxLength={120} placeholder="Ex.: gorjeta em dinheiro, mesa 07" /></label>
         <button className={`btn btn-primary${busy ? ' loading' : ''}`} disabled={busy} type="submit"><Icon name="plus" size={16} />Lançar</button>
